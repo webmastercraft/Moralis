@@ -54,7 +54,9 @@ let testData = {
   blockheight: 20138207,
   chain: "polygon",
 };
-
+let stopBlock = testData.blockheight;
+let changecount = 0;
+let outputResult = [];
 function sortBlockNumber_reverseChrono(a, b) {
   if (a.block_number > b.block_number) {
     return -1;
@@ -66,300 +68,340 @@ function sortBlockNumber_reverseChrono(a, b) {
 }
 
 async function getWalletCostBasis(data) {
-  let returnData = [];
+    let returnData = [];
 
-  //Get global data
-  await Promise.all([
-    getTokenBalances(data.chain, data.wallet.toLowerCase(), data.blockheight),
-    getTokenTransfers(data.chain, data.wallet.toLowerCase(), data.blockheight, 0),
-    getTransactions(data.chain, data.wallet.toLowerCase(), data.blockheight, 0),
-  ]).then((result) => {
-    global_balances = result[0];
-    global_transfers = result[1];
-    console.log('global_transfers: ', global_transfers.length);
-    global_tx = result[2];
-    console.log('global_tx: ', global_tx.length);
-  }).catch(e => console.log(e));
+    //Get global data
+    await Promise.all([
+        getTokenBalances(
+            data.chain,
+            data.wallet.toLowerCase(),
+            data.blockheight
+        ),
+        getTokenTransfers(
+            data.chain,
+            data.wallet.toLowerCase(),
+            data.blockheight,
+            0
+        ),
+        getTransactions(
+            data.chain,
+            data.wallet.toLowerCase(),
+            data.blockheight,
+            0
+        ),
+    ])
+        .then((result) => {
+            global_balances = result[0];
+            global_transfers = result[1];
+            console.log("global_transfers: ", global_transfers.length);
+            global_tx = result[2];
+            console.log("global_tx: ", global_tx.length);
+        })
+        .catch((e) => console.log(e));
 
-  //Copy native transfers to ERC20 transfers
-  native_xfers = global_tx.filter((xfer) => xfer.value > 0);
-  for (let i = 0; i < native_xfers.length; i++) {
-    const tx = native_xfers[i];
-    global_transfers.push({
-      address: chainCoins[data.chain].address, //token address = wmatic
-      block_hash: tx.block_hash,
-      block_number: tx.block_number,
-      block_timestamp: tx.block_timestamp,
-      from_address: tx.from_address,
-      to_address: tx.to_address,
-      transaction_hash: tx.hash,
-      value: tx.value, //tx value
-    });
-  }
-  global_transfers = global_transfers.sort(
-    sortBlockNumber_reverseChrono
-  );
-  //Sort global_transfers reverse-chronological by block_number
-
-  //Get token metadata
-  var token_list = global_transfers.map((xfer) => xfer.address);
-  token_list.push(chainCoins[data.chain].address); //add native token
-  var filtered_token_list = [];
-  token_list.map(each => {
-    if (filtered_token_list.indexOf(each) === -1) filtered_token_list.push(each);
-  })
-  console.log('filtered_token_list: ', filtered_token_list.length);
-  global_token_meta = await getTokenMetadata(data.chain, filtered_token_list);
-
-  //If token specified in request, just do that token instead of the whole wallet
-  if (data.token) {
-    global_balances = global_balances.filter(
-      (each) => each.token_address == data.token
-    );
-  }
-
-  //Run cost basis for illiquid tokens
-  //TODO: Make this loop asynchronous using Promise.allSettled
-  for (let i = 0; i < global_balances.length; i++) {
-    const price = await getTokenPrice(
-      data.chain,
-      global_balances[i].token_address,
-      data.blockheight
-    );
-    if (price) {
-      //Liquid token
-      global_balances[i].usdPrice = price.usdPrice;
-    } else {
-      //Illiquid token
-      global_balances[i].usdPrice = null;
-      const tokenHistory = await getTokenCostBasis(
-        data.chain,
-        data.blockheight,
-        data.wallet.toLowerCase(),
-        global_balances[i].token_address,
-        global_balances[i].balance / 10 ** global_balances[i].decimals,
-        1
-      );
-      returnData.push(tokenHistory);
+    //Copy native transfers to ERC20 transfers
+    native_xfers = global_tx.filter((xfer) => xfer.value > 0);
+    for (let i = 0; i < native_xfers.length; i++) {
+        const tx = native_xfers[i];
+        global_transfers.push({
+            address: chainCoins[data.chain].address, //token address = wmatic
+            block_hash: tx.block_hash,
+            block_number: tx.block_number,
+            block_timestamp: tx.block_timestamp,
+            from_address: tx.from_address,
+            to_address: tx.to_address,
+            transaction_hash: tx.hash,
+            value: tx.value, //tx value
+        });
     }
-  }
+    global_transfers = global_transfers.sort(sortBlockNumber_reverseChrono);
+    //Sort global_transfers reverse-chronological by block_number
 
-  return returnData;
+    //Get token metadata
+    var token_list = global_transfers.map((xfer) => xfer.address);
+    token_list.push(chainCoins[data.chain].address); //add native token
+    var filtered_token_list = [];
+    token_list.map((each) => {
+        if (filtered_token_list.indexOf(each) === -1)
+            filtered_token_list.push(each);
+    });
+    console.log("filtered_token_list: ", filtered_token_list.length);
+    global_token_meta = await getTokenMetadata(data.chain, filtered_token_list);
+
+    //If token specified in request, just do that token instead of the whole wallet
+    if (data.token) {
+        global_balances = global_balances.filter(
+            (each) => each.token_address == data.token
+        );
+    }
+
+    //Run cost basis for illiquid tokens
+    //TODO: Make this loop asynchronous using Promise.allSettled
+    for (let i = 0; i < global_balances.length; i++) {
+        const price = await getTokenPrice(
+            data.chain,
+            global_balances[i].token_address,
+            data.blockheight
+        );
+        if (price) {
+            //Liquid token
+            global_balances[i].usdPrice = price.usdPrice;
+        } else {
+            //Illiquid token
+            global_balances[i].usdPrice = null;
+            const tokenHistory = await getTokenCostBasis(
+                data.chain,
+                data.blockheight,
+                data.wallet.toLowerCase(),
+                global_balances[i].token_address,
+                global_balances[i].balance / 10 ** global_balances[i].decimals,
+                1
+            );
+            returnData.push(tokenHistory);
+        }
+    }
+
+    return returnData;
 }
 
 //Test case
 getWalletCostBasis(testData).then(console.log);
 
 //getHistory(testData).then(console.log);
-
 async function getTokenCostBasis(
-  chain,
-  block,
-  wallet,
-  token,
-  token_balance_ending,
-  hierarchy_level
+    chain,
+    block,
+    wallet,
+    token,
+    token_balance_ending,
+    hierarchy_level
 ) {
-  console.log(
-    "Cost basis for: Token:" +
-      token +
-      " Block:" +
-      block +
-      " token_balance_ending: " +
-      token_balance_ending
-  );
-  let cost_basis = 0;
-
-  let price = await getTokenPrice(chain, token, block);
-  if (price) {
-    cost_basis = token_balance_ending * price.usdPrice;
-    console.log("Token: " + token + " Cost= " + cost_basis);
-    return cost_basis;
-  }
-
-  //Retrieve transactions in token A
-  var hist_xfers = global_transfers.filter(
-    (xfer) => xfer.address == token && xfer.used == undefined
-  );
-
-  //Get cost basis for each transaction
-  for (const transfer of hist_xfers) {
-    transfer.used = true;
-    if (transfer.from_address.toLowerCase() == wallet) {
-      var sign = -1; //from my wallet. debit outflow
-    } else if (transfer.to_address.toLowerCase() == wallet) {
-      var sign = 1; //to my wallet. credit inflow
-    } else {
-      console.log(
-        "Error: wallet address " +
-          wallet +
-          " not found in transaction " +
-          transfer.transation_hash
-      );
-      return;
+    if (stopBlock != block) {
+        stopBlock = block;
+        changecount++;
     }
-    //Find offsetting coins from same transaction
-    var offsetting_coins = global_transfers.filter(
-      (xfer) =>
-        xfer.transaction_hash == transfer.transaction_hash &&
-        xfer.used == undefined
+    if (changecount > 1) return 0;
+    console.log(
+        "Cost basis for: Token:" +
+            token +
+            " Block:" +
+            block +
+            " token_balance_ending: " +
+            token_balance_ending,
+        hierarchy_level
     );
-    if (sign == 1) {
-      //main transaction is an inflow, so look for offsetting outflows
-      offsetting_coins = offsetting_coins.filter(
-        (xfer) => xfer.from_address.toLowerCase() == wallet
-      );
-    } else if (sign == -1) {
-      //main transaction is an outflow, so look for offsetting inflows
-      offsetting_coins = offsetting_coins.filter(
-        (xfer) => xfer.to_address.toLowerCase() == wallet
-      );
+    outputResult.push({
+        hierarchy_level: hierarchy_level,
+        transaction_id: "",
+    });
+    let cost_basis = 0;
+
+    let price = await getTokenPrice(chain, token, block);
+    if (price) {
+        cost_basis = token_balance_ending * price.usdPrice;
+        console.log("Token: " + token + " Cost= " + cost_basis);
+        return cost_basis;
     }
 
-    //Get cost basis of each offsetting token
-    for (const offsetting_coin of offsetting_coins) {
-      offsetting_coin.used = true;
-      const coin_meta = global_token_meta.filter(
-        (t) => t.address == offsetting_coin.address
-      )[0];
-      const token_balance_ending =
-        offsetting_coin.value / 10 ** coin_meta.decimals;
-      cost_basis +=
-        sign *
-        (await getTokenCostBasis(
-          chain,
-          offsetting_coin.block_number,
-          wallet,
-          offsetting_coin.address,
-          token_balance_ending,
-          hierarchy_level + 1
-        ));
+    //Retrieve transactions in token A
+    var hist_xfers = global_transfers.filter(
+        (xfer) => xfer.address == token && xfer.used == undefined
+    );
+
+    //Get cost basis for each transaction
+    for (const transfer of hist_xfers) {
+        transfer.used = true;
+        if (transfer.from_address.toLowerCase() == wallet) {
+            var sign = -1; //from my wallet. debit outflow
+        } else if (transfer.to_address.toLowerCase() == wallet) {
+            var sign = 1; //to my wallet. credit inflow
+        } else {
+            console.log(
+                "Error: wallet address " +
+                    wallet +
+                    " not found in transaction " +
+                    transfer.transation_hash
+            );
+            return;
+        }
+        //Find offsetting coins from same transaction
+        var offsetting_coins = global_transfers.filter(
+            (xfer) =>
+                xfer.transaction_hash == transfer.transaction_hash &&
+                xfer.used == undefined
+        );
+        if (sign == 1) {
+            //main transaction is an inflow, so look for offsetting outflows
+            offsetting_coins = offsetting_coins.filter(
+                (xfer) => xfer.from_address.toLowerCase() == wallet
+            );
+        } else if (sign == -1) {
+            //main transaction is an outflow, so look for offsetting inflows
+            offsetting_coins = offsetting_coins.filter(
+                (xfer) => xfer.to_address.toLowerCase() == wallet
+            );
+        }
+
+        //Get cost basis of each offsetting token
+        for (const offsetting_coin of offsetting_coins) {
+            offsetting_coin.used = true;
+            const coin_meta = global_token_meta.filter(
+                (t) => t.address == offsetting_coin.address
+            )[0];
+            const token_balance_ending =
+                offsetting_coin.value / 10 ** coin_meta.decimals;
+            cost_basis +=
+                sign *
+                (await getTokenCostBasis(
+                    chain,
+                    offsetting_coin.block_number,
+                    wallet,
+                    offsetting_coin.address,
+                    token_balance_ending,
+                    hierarchy_level + 1
+                ));
+        }
     }
-  }
-  return cost_basis;
+    return cost_basis;
 }
 
 // Moralis functions
 async function getTokenMetadata(_chain, _tokenAddresses) {
-  let options;
-  try {
-    var page = 0, tokenMetadata = [], result;
-    while (page < Math.ceil(_tokenAddresses.length / 10)) {
-      options = {
-        chain: _chain,
-        addresses: _tokenAddresses.splice(0, 10)
-      }
-      result = await Moralis.Web3API.token.getTokenMetadata(options);
-      tokenMetadata = tokenMetadata.concat(result);
-      page++;
+    let options;
+    try {
+        var page = 0,
+            tokenMetadata = [],
+            result;
+        while (page < Math.ceil(_tokenAddresses.length / 10)) {
+            options = {
+                chain: _chain,
+                addresses: _tokenAddresses.splice(0, 10),
+            };
+            result = await Moralis.Web3API.token.getTokenMetadata(options);
+            tokenMetadata = tokenMetadata.concat(result);
+            page++;
+        }
+        return tokenMetadata;
+    } catch (e) {
+        console.log(e);
+        return null;
     }
-    return tokenMetadata;
-  } catch (e) {
-    console.log(e);
-    return null;
-  }
 }
 
 async function getTransactions(_chain, _tokenAddress, _toBlock) {
-  let options = {
-    chain: _chain,
-    address: _tokenAddress,
-    order: "desc",
-    offset: 0
-  };
-  if (_toBlock) options.to_block = _toBlock;
-  try {
-    const result = await Moralis.Web3API.account.getTransactions(options);
-    if (Number(result.total) > 500) {
-      let page = 1, txFunctions = [], mergeResult = result.result;
-      while (page < Math.ceil(result.total / 500)) {
-        options.offset = page * 500;
-        txFunctions.push(Moralis.Web3API.account.getTransactions(options));
-        if (page % 1 === 0) {
-          await Promise.all(txFunctions).then(results => {
-            results.map(each => {
-              mergeResult = mergeResult.concat(each.result);
-            })
-          }).catch(e => console.log(e))
-          txFunctions = [];
-        }
-        page++;
-      }
-      if (txFunctions.length) {
-        await Promise.all(txFunctions).then(results => {
-          results.map(each => {
-            mergeResult = mergeResult.concat(each.result);
-          }) 
-          return mergeResult;
-        }).catch(e => console.log(e))
-      } else return mergeResult;
+    let options = {
+        chain: _chain,
+        address: _tokenAddress,
+        order: "desc",
+        offset: 0,
+    };
+    if (_toBlock) options.to_block = _toBlock;
+    try {
+        const result = await Moralis.Web3API.account.getTransactions(options);
+        if (Number(result.total) > 500) {
+            let page = 1,
+                txFunctions = [],
+                mergeResult = result.result;
+            while (page < Math.ceil(result.total / 500)) {
+                options.offset = page * 500;
+                txFunctions.push(
+                    Moralis.Web3API.account.getTransactions(options)
+                );
+                if (page % 1 === 0) {
+                    await Promise.all(txFunctions)
+                        .then((results) => {
+                            results.map((each) => {
+                                mergeResult = mergeResult.concat(each.result);
+                            });
+                        })
+                        .catch((e) => console.log(e));
+                    txFunctions = [];
+                }
+                page++;
+            }
+            if (txFunctions.length) {
+                await Promise.all(txFunctions)
+                    .then((results) => {
+                        results.map((each) => {
+                            mergeResult = mergeResult.concat(each.result);
+                        });
+                        return mergeResult;
+                    })
+                    .catch((e) => console.log(e));
+            } else return mergeResult;
+        } else return result.result;
+        return result.result;
+    } catch (e) {
+        console.log(e);
+        return null;
     }
-    else return result.result;
-    return result.result;
-  } catch (e) {
-    console.log(e);
-    return null;
-  }
 }
 
 async function getTokenPrice(_chain, _address, _toBlock) {
-  const options = { address: _address, chain: _chain, to_block: _toBlock };
-  try {
-    return await Moralis.Web3API.token.getTokenPrice(options);
-  } catch (e) {
-    return null;
-  }
+    const options = { address: _address, chain: _chain, to_block: _toBlock };
+    try {
+        return await Moralis.Web3API.token.getTokenPrice(options);
+    } catch (e) {
+        return null;
+    }
 }
 
 async function getTokenBalances(_chain, _address, _toBlock) {
-  let options = {
-    chain: _chain,
-    address: _address
-  };
-  if (_toBlock) options.to_block = _toBlock;
-  try {
-    return await Moralis.Web3API.account.getTokenBalances(options);
-  } catch (e) {
-    return null;
-  }
+    let options = {
+        chain: _chain,
+        address: _address,
+    };
+    if (_toBlock) options.to_block = _toBlock;
+    try {
+        return await Moralis.Web3API.account.getTokenBalances(options);
+    } catch (e) {
+        return null;
+    }
 }
 
 async function getTokenTransfers(_chain, _address, _toBlock) {
-  let options = {
-    address: _address,
-    chain: _chain,
-    offset: 0
-  };
-  if (_toBlock) options.to_block = _toBlock;
-  try {
-    const result = await Moralis.Web3API.account.getTokenTransfers(options);
-    if (Number(result.total) > 500) {
-      let page = 1, transferFunctions = [], mergeResult = result.result;
-      while (page < Math.ceil(result.total / 500)) {
-        options.offset = page * 500;
-        transferFunctions.push(Moralis.Web3API.account.getTokenTransfers(options));
-        if (page % 1 === 0) {
-          await Promise.all(transferFunctions).then(results => {
-            results.map(each => {
-              mergeResult = mergeResult.concat(each.result);
-            })
-          }).catch(e => console.log(e))
-          transferFunctions = [];
-        }
-        page++;
-      }
-      if (transferFunctions.length) {
-        await Promise.all(transferFunctions).then(results => {
-          results.map(each => {
-            mergeResult = mergeResult.concat(each.result);
-          }) 
-          return mergeResult;
-        }).catch(e => console.log(e))
-      } else return mergeResult;
+    let options = {
+        address: _address,
+        chain: _chain,
+        offset: 0,
+    };
+    if (_toBlock) options.to_block = _toBlock;
+    try {
+        const result = await Moralis.Web3API.account.getTokenTransfers(options);
+        if (Number(result.total) > 500) {
+            let page = 1,
+                transferFunctions = [],
+                mergeResult = result.result;
+            while (page < Math.ceil(result.total / 500)) {
+                options.offset = page * 500;
+                transferFunctions.push(
+                    Moralis.Web3API.account.getTokenTransfers(options)
+                );
+                if (page % 1 === 0) {
+                    await Promise.all(transferFunctions)
+                        .then((results) => {
+                            results.map((each) => {
+                                mergeResult = mergeResult.concat(each.result);
+                            });
+                        })
+                        .catch((e) => console.log(e));
+                    transferFunctions = [];
+                }
+                page++;
+            }
+            if (transferFunctions.length) {
+                await Promise.all(transferFunctions)
+                    .then((results) => {
+                        results.map((each) => {
+                            mergeResult = mergeResult.concat(each.result);
+                        });
+                        return mergeResult;
+                    })
+                    .catch((e) => console.log(e));
+            } else return mergeResult;
+        } else return result.result;
+    } catch (e) {
+        console.log(e);
+        return null;
     }
-    else return result.result;
-  } catch (e) {
-    console.log(e)
-    return null;
-  }
 }
